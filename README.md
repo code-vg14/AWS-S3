@@ -11,5 +11,6 @@ usage:
 
       $s3Content = new AwsController();
       $file = $s3Content->getS3Content($path);
+      echo($file);
       
  
