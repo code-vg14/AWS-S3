@@ -54,9 +54,8 @@ class AwsController extends AppController
 					'Bucket' => $s3Credentials['BUCKET'],
 					'Key'    => $path,						
 	
-			]);
-					
-			$request = $s3->createPresignedRequest($cmd, '+20 minutes');
+			]);					
+			$request = $s3->createPresignedRequest($cmd, '+10 seconds');
 			$presignedUrl = (string)$request->getUri();
 			return $temp;
 	
