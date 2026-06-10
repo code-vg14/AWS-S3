@@ -1,68 +1,100 @@
 <?php
+declare(strict_types=1);
+
 namespace App\Controller;
 
-use App\Controller\AppController;
-use Aws\CloudFront\CloudFrontClient;
-use Aws\CloudFront\Exception\CloudFrontException;
 use Aws\S3\Exception\S3Exception;
 use Aws\S3\S3Client;
 use Cake\Core\Configure;
-use Cake\Event\Event;
+use Cake\Event\EventInterface;
 
-/**
- * @property \App\Model\Table\
- */
 class AwsController extends AppController
 {
-	public function beforeFilter(Event $event){	
-		parent::beforeFilter($event);
-	}		
-	//** This will get the S3 Object *//
-	public function getS3Object(){	
-		try {	
-			$this->autoRender = false;
-			$s3Credentials = Configure::read('S3_CREDENTIALS');
-	
-			$s3 = S3Client::factory([
-					'credentials' => [
-							'key' => $s3Credentials['KEY'],
-							'secret' => $s3Credentials['SECRET']
-					],
-					'region' => $s3Credentials['REGION'],
-					'version' => $s3Credentials['VERSION'],
-						
-			]);
-				
-			return $s3;
-	
-		}catch (S3Exception $e) {
-			echo $e->getMessage() . "\n";
-		}
-	
-	}
-	//** Get S3 Preassigned urls for your content**//
-	public function getS3Content($path = null){	
-		try{
-			$s3Credentials = Configure::read('S3_CREDENTIALS');
-			$s3 = $this->getS3Object();
-			$result = $s3->getObject(array(
-					'Bucket' => $s3Credentials['BUCKET'],
-					'Key'    => $path,
-					'SaveAs' => $temp
-			));
-			$cmd = $s3->getCommand('GetObject', [
-					'Bucket' => $s3Credentials['BUCKET'],
-					'Key'    => $path,						
-	
-			]);					
-			$request = $s3->createPresignedRequest($cmd, '+10 seconds');
-			$presignedUrl = (string)$request->getUri();
-			return $temp;
-	
-		}catch (S3Exception $e) {
-			echo $e->getMessage() . "\n";
-		}
-			
-	}
-	
+    /**
+     * Instantiates and returns a configured S3 client.
+     *
+     * @throws \RuntimeException If S3 credentials are missing or invalid.
+     * @return \Aws\S3\S3Client
+     */
+    private function getS3Client(): S3Client
+    {
+        $credentials = Configure::read('S3_CREDENTIALS');
+
+        if (empty($credentials['KEY']) || empty($credentials['SECRET'])) {
+            throw new \RuntimeException('S3 credentials are not configured.');
+        }
+
+        return new S3Client([
+            'credentials' => [
+                'key'    => $credentials['KEY'],
+                'secret' => $credentials['SECRET'],
+            ],
+            'region'  => $credentials['REGION'],
+            'version' => $credentials['VERSION'] ?? 'latest',
+        ]);
+    }
+
+    /**
+     * Downloads an S3 object to a local temp file and returns the temp file path.
+     *
+     * @param string $path The S3 object key.
+     * @throws \Aws\S3\Exception\S3Exception On S3 errors.
+     * @throws \RuntimeException If the temp file cannot be created.
+     * @return string Absolute path to the downloaded temp file.
+     */
+    public function getS3Content(string $path): string
+    {
+        $this->autoRender = false;
+
+        $credentials = Configure::read('S3_CREDENTIALS');
+        $tempFile = tempnam(sys_get_temp_dir(), 's3_');
+
+        if ($tempFile === false) {
+            throw new \RuntimeException('Unable to create a temporary file.');
+        }
+
+        try {
+            $s3 = $this->getS3Client();
+
+            $s3->getObject([
+                'Bucket' => $credentials['BUCKET'],
+                'Key'    => $path,
+                'SaveAs' => $tempFile,
+            ]);
+
+            return $tempFile;
+
+        } catch (S3Exception $e) {
+            // Clean up the empty temp file if the download failed.
+            if (file_exists($tempFile)) {
+                unlink($tempFile);
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Generates a short-lived pre-signed URL for an S3 object.
+     *
+     * @param string $path    The S3 object key.
+     * @param string $expires A strtotime-compatible expiry string (default: '+15 minutes').
+     * @throws \Aws\S3\Exception\S3Exception On S3 errors.
+     * @return string The pre-signed URL.
+     */
+    public function getS3PresignedUrl(string $path, string $expires = '+15 minutes'): string
+    {
+        $this->autoRender = false;
+
+        $credentials = Configure::read('S3_CREDENTIALS');
+
+        $s3  = $this->getS3Client();
+        $cmd = $s3->getCommand('GetObject', [
+            'Bucket' => $credentials['BUCKET'],
+            'Key'    => $path,
+        ]);
+
+        $request = $s3->createPresignedRequest($cmd, $expires);
+
+        return (string) $request->getUri();
+    }
 }
